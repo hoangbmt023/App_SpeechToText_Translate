@@ -54,7 +54,7 @@ App_SpeechToText_Translate/
 │   └── whisper_service.dart     # dịch văn bản từ âm thanh
 │── assets/
 │    └── models/
-│         └── ggml-base.en-q5_1.bin   # Model Whisper (mặc định ~320MB)
+│         └── ggml-base.en-q5_1.bin   # Model Whisper (mặc định ~57MB)
 │── pubspec.yaml     # File cấu hình dependencies
 │── README.md        # Hướng dẫn sử dụng
 ```
@@ -62,7 +62,7 @@ App_SpeechToText_Translate/
 ---
 
 ## 🔄 Sử dụng model Whisper khác
-Hiện tại dự án sử dụng **ggml-base.en-q5_1.bin** (~320MB).  
+Hiện tại dự án sử dụng **ggml-base.en-q5_1.bin** (~57MB bản đã nén).  
 Nếu bạn muốn sử dụng model mạnh hơn (hoặc nhẹ hơn), hãy làm theo:
 
 1. Truy cập: [HuggingFace Whisper.cpp models](https://huggingface.co/ggerganov/whisper.cpp)
