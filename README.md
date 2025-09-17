@@ -1,7 +1,7 @@
 # 🎤 SpeechToText Translate - Nhóm 6
 
 ## 📱 Giới thiệu
-Đây là ứng dụng Flutter được phát triển bởi **HH_Nhom6**.  
+Đây là ứng dụng Flutter được phát triển bởi **Nhom6**.  
 Ứng dụng có mục tiêu:
 - Chuyển đổi **video thành văn bản**
 - Hỗ trợ dịch thuật (Translate)
@@ -49,7 +49,9 @@ App_SpeechToText_Translate/
 │── android/         # Code Android gốc
 │── lib/             # Source code Flutter (Dart)
 │   │── main.dart    # Điểm vào ứng dụng
-│   └── screens/     # Giao diện màn hình
+│   └── audio_converter.dart     #  chuyển mp4 sang âm thanh
+│   └── translate_service.dart     # dịch thuâ
+│   └── whisper_service.dart     # dịch văn bản từ âm thanh
 │── assets/
 │    └── models/
 │         └── ggml-base.en-q5_1.bin   # Model Whisper (mặc định ~320MB)
