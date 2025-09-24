@@ -1,18 +1,19 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:speechtotext_translate_nhom6/audio_converter.dart';
 import 'package:speechtotext_translate_nhom6/whisper_service.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
 void main() {
-  runApp(MaterialApp(
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      primarySwatch: Colors.blue,
+  runApp(
+    MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: SpeechToTextPage(),
     ),
-    home: SpeechToTextPage(),
-  ));
+  );
 }
 
 class SpeechToTextPage extends StatefulWidget {
@@ -52,11 +53,41 @@ class _SpeechToTextPageState extends State<SpeechToTextPage> {
       return;
     }
 
-    final text = await WhisperService.transcribe(wavFile);
-    setState(() {
-      _transcribedText = text;
-      _isLoading = false;
-    });
+    final chunks = await AudioConverter.splitAudioToChunks(wavFile);
+    if (chunks.isEmpty) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    StringBuffer buffer = StringBuffer();
+
+    // Dùng for-loop chuẩn + await để UI update từng chunk
+    for (int i = 0; i < chunks.length; i++) {
+      final chunk = chunks[i];
+      print("📝 Transcribing chunk ${i + 1}/${chunks.length}");
+
+      final text = await WhisperService.transcribe(chunk);
+
+      if (text != null && text.isNotEmpty) {
+        buffer.write(text.trim() + " ");
+        print("✅ Chunk ${i + 1} đã dịch xong: ${text.trim()}");
+      } else {
+        print("⚠️ Chunk ${i + 1} không có text");
+      }
+
+      // ✅ Cập nhật UI ngay sau mỗi chunk
+      if (mounted) {
+        setState(() {
+          _transcribedText = buffer.toString();
+          _isLoading = false; // <-- tắt loading ngay sau chunk đầu tiên
+        });
+      }
+
+      await Future.delayed(Duration.zero);
+    }
+
+    print("🎯 Tất cả chunk đã transcribe xong!");
+    if (mounted) setState(() => _isLoading = false);
   }
 
   Future<void> _translateText() async {
@@ -67,8 +98,9 @@ class _SpeechToTextPageState extends State<SpeechToTextPage> {
     _translator?.close();
     _translator = OnDeviceTranslator(
       sourceLanguage: TranslateLanguage.english,
-      targetLanguage: TranslateLanguage.values
-          .firstWhere((lang) => lang.bcpCode == _selectedLang),
+      targetLanguage: TranslateLanguage.values.firstWhere(
+        (lang) => lang.bcpCode == _selectedLang,
+      ),
     );
 
     try {
@@ -92,35 +124,68 @@ class _SpeechToTextPageState extends State<SpeechToTextPage> {
       _translatedText = null;
     });
 
+    // 1️⃣ Chuyển MP4 -> WAV
     final wavFile = await AudioConverter.convertMp4ToAudio(mp4File);
     if (wavFile == null) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
       return;
     }
 
-    final text = await WhisperService.transcribe(wavFile);
-    if (text == null || text.isEmpty) {
-      setState(() => _isLoading = false);
+    // 2️⃣ Cắt WAV thành chunks
+    final chunks = await AudioConverter.splitAudioToChunks(wavFile);
+    if (chunks.isEmpty) {
+      if (mounted) setState(() => _isLoading = false);
       return;
     }
 
+    // 3️⃣ Khởi tạo Translator
     _translator?.close();
     _translator = OnDeviceTranslator(
       sourceLanguage: TranslateLanguage.english,
-      targetLanguage: TranslateLanguage.values
-          .firstWhere((lang) => lang.bcpCode == _selectedLang),
+      targetLanguage: TranslateLanguage.values.firstWhere(
+        (lang) => lang.bcpCode == _selectedLang,
+      ),
     );
 
-    try {
-      final result = await _translator!.translateText(text);
-      setState(() {
-        _translatedText = result;
-        _isLoading = false;
-      });
-    } catch (e) {
-      print("Translate error: $e");
-      setState(() => _isLoading = false);
+    StringBuffer transcribedBuffer = StringBuffer();
+    StringBuffer translatedBuffer = StringBuffer();
+
+    for (int i = 0; i < chunks.length; i++) {
+      final chunk = chunks[i];
+      print("📝 Transcribing chunk ${i + 1}/${chunks.length}");
+
+      final text = await WhisperService.transcribe(chunk);
+
+      if (text != null && text.isNotEmpty) {
+        transcribedBuffer.write(text.trim() + " ");
+        print("✅ Chunk ${i + 1} đã transcribe: ${text.trim()}");
+
+        // Dịch ngay chunk này
+        try {
+          final translatedText = await _translator!.translateText(text);
+          translatedBuffer.write(translatedText.trim() + " ");
+          print("🌐 Chunk ${i + 1} đã dịch: $translatedText");
+        } catch (e) {
+          print("Translate error chunk ${i + 1}: $e");
+        }
+      } else {
+        print("⚠️ Chunk ${i + 1} không có text");
+      }
+
+      // Cập nhật UI sau mỗi chunk
+      if (mounted) {
+        setState(() {
+          _transcribedText = transcribedBuffer.toString();
+          _translatedText = translatedBuffer.toString();
+          _isLoading = false;
+        });
+      }
+
+      await Future.delayed(Duration.zero); // giúp UI update
     }
+
+    print("🎯 Tất cả chunk đã transcribe & translate xong!");
+    if (mounted) setState(() => _isLoading = false);
   }
 
   @override
@@ -149,12 +214,18 @@ class _SpeechToTextPageState extends State<SpeechToTextPage> {
             Card(
               elevation: 4,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+                borderRadius: BorderRadius.circular(12),
+              ),
               child: ListTile(
-                leading: Icon(Icons.video_library, color: Colors.blue, size: 40),
-                title: Text("Chọn video MP4",
-                    style:
-                    TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                leading: Icon(
+                  Icons.video_library,
+                  color: Colors.blue,
+                  size: 40,
+                ),
+                title: Text(
+                  "Chọn video MP4",
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
                 subtitle: Text("Nhận diện giọng nói bằng Whisper"),
                 trailing: ElevatedButton.icon(
                   onPressed: _isLoading ? null : _pickAndProcessVideo,
@@ -169,7 +240,8 @@ class _SpeechToTextPageState extends State<SpeechToTextPage> {
             Card(
               elevation: 4,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+                borderRadius: BorderRadius.circular(12),
+              ),
               child: Padding(
                 padding: EdgeInsets.all(12),
                 child: Column(
@@ -219,122 +291,138 @@ class _SpeechToTextPageState extends State<SpeechToTextPage> {
                   ? Center(child: CircularProgressIndicator())
                   : _translatedText != null || _transcribedText != null
                   ? Card(
-                elevation: 3,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (_transcribedText != null && _translatedText == null) ...[
-                          Row(
+                      elevation: 3,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.text_snippet, color: Colors.blue),
-                              SizedBox(width: 6),
-                              Text("Kết quả Whisper",
-                                  style: TextStyle(
-                                      fontSize: 20, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                              _transcribedText ?? "",
-                            style: TextStyle(
-                              fontSize: 19,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          SizedBox(height: 18),
-
-                          // ✅ Chọn ngôn ngữ + nút Translate
-                          Row(
-                            children: [
-                              Expanded(
-                                child: DropdownButton<String>(
-                                  value: _selectedLang,
-                                  isExpanded: true,
-                                  items: _languages.entries.map((e) {
-                                    return DropdownMenuItem(
-                                      value: e.key,
-                                      child: Text(e.value),
-                                    );
-                                  }).toList(),
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _selectedLang = value!;
-                                    });
-                                  },
-                                ),
-                              ),
-                              SizedBox(width: 8),
-                              ElevatedButton.icon(
-                                onPressed: _translateText,
-                                icon: Icon(Icons.g_translate),
-                                label: Text("Translate"),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                        if (_translatedText != null) ...[
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(Icons.language, color: Colors.green),
-                                  SizedBox(width: 6),
-                                  Text(
-                                    "Kết quả dịch",
-                                    style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.green,
+                              if (_transcribedText != null &&
+                                  _translatedText == null) ...[
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.text_snippet,
+                                      color: Colors.blue,
                                     ),
-                                  ),
-                                ],
-                              ),
-
-                              // ✅ Nút quay về kết quả ban đầu
-                              TextButton.icon(
-                                onPressed: () {
-                                  setState(() {
-                                    _translatedText = null; // chỉ xóa dịch, giữ nguyên _transcribedText
-                                  });
-                                },
-                                icon: Icon(Icons.refresh, color: Colors.blue),
-                                label: Text(
-                                  "Trở về",
-                                  style: TextStyle(color: Colors.blue),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      "Kết quả Whisper",
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
+                                SizedBox(height: 8),
+                                Text(
+                                  _transcribedText ?? "",
+                                  style: TextStyle(
+                                    fontSize: 19,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                SizedBox(height: 18),
+
+                                // ✅ Chọn ngôn ngữ + nút Translate
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: DropdownButton<String>(
+                                        value: _selectedLang,
+                                        isExpanded: true,
+                                        items: _languages.entries.map((e) {
+                                          return DropdownMenuItem(
+                                            value: e.key,
+                                            child: Text(e.value),
+                                          );
+                                        }).toList(),
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _selectedLang = value!;
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                    SizedBox(width: 8),
+                                    ElevatedButton.icon(
+                                      onPressed: _translateText,
+                                      icon: Icon(Icons.g_translate),
+                                      label: Text("Translate"),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.green,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                              if (_translatedText != null) ...[
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          Icons.language,
+                                          color: Colors.green,
+                                        ),
+                                        SizedBox(width: 6),
+                                        Text(
+                                          "Kết quả dịch",
+                                          style: TextStyle(
+                                            fontSize: 20,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.green,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+
+                                    // ✅ Nút quay về kết quả ban đầu
+                                    TextButton.icon(
+                                      onPressed: () {
+                                        setState(() {
+                                          _translatedText =
+                                              null; // chỉ xóa dịch, giữ nguyên _transcribedText
+                                        });
+                                      },
+                                      icon: Icon(
+                                        Icons.refresh,
+                                        color: Colors.blue,
+                                      ),
+                                      label: Text(
+                                        "Trở về",
+                                        style: TextStyle(color: Colors.blue),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  _translatedText ?? "",
+                                  style: TextStyle(
+                                    color: Colors.green,
+                                    fontSize: 19, // tăng size chữ dịch
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
-                          SizedBox(height: 8),
-                          Text(
-                            _translatedText ?? "",
-                            style: TextStyle(
-                              color: Colors.green,
-                              fontSize: 19,   // tăng size chữ dịch
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              )
+                        ),
+                      ),
+                    )
                   : Center(
-                child: Text("Chưa có dữ liệu",
-                    style: TextStyle(
-                        color: Colors.grey,
-                        fontSize: 19
-                    )),
-              ),
+                      child: Text(
+                        "Chưa có dữ liệu",
+                        style: TextStyle(color: Colors.grey, fontSize: 19),
+                      ),
+                    ),
             ),
           ],
         ),

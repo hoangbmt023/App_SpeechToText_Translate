@@ -11,8 +11,9 @@ class WhisperService {
 
     if (!await modelFile.exists() || await modelFile.length() == 0) {
       try {
-        final byteData =
-        await rootBundle.load('assets/models/ggml-base.en-q5_1.bin');
+        final byteData = await rootBundle.load(
+          'assets/models/ggml-base.en-q5_1.bin',
+        );
         await modelFile.writeAsBytes(byteData.buffer.asUint8List());
         print('Copied model from assets');
       } catch (e) {
@@ -36,9 +37,7 @@ class WhisperService {
 
     final response = await whisper.transcribe(
       modelPath: modelFile.path,
-      transcribeRequest: TranscribeRequest(
-        audio: audioFile.path,
-      ),
+      transcribeRequest: TranscribeRequest(audio: audioFile.path),
     );
 
     return response.text;
